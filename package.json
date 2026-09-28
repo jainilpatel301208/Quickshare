@@ -1,0 +1,22 @@
+{
+  "name": "quickshare-workspace",
+  "version": "1.0.0",
+  "private": true,
+  "description": "QuickShare — Fast, Simple, and Beginner-Friendly File Sharing Web App",
+  "scripts": {
+    "dev:backend": "cd backend && npm run dev",
+    "dev:frontend": "cd frontend && npm run dev",
+    "start:backend": "cd backend && npm start",
+    "start:frontend": "cd frontend && npm run dev"
+  },
+  "keywords": [
+    "quickshare",
+    "file-sharing",
+    "react",
+    "vite",
+    "express",
+    "nodejs"
+  ],
+  "author": "",
+  "license": "ISC"
+}
