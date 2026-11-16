@@ -251,7 +251,7 @@ export default function App() {
 
       {/* Clean Footer */}
       <footer className="footer">
-        <p>QuickShare &bull; In-Memory Secure File Transfer &bull; Up to 25MB Demo Limit</p>
+        <p>QuickShare &bull; Secure File Transfer &bull; Unlimited File Size (Supports 5GB+) &bull; 24h Auto-Expiry</p>
       </footer>
     </div>
   );

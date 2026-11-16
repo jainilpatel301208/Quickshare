@@ -15,8 +15,9 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 5001;
 const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173';
-const MAX_FILE_SIZE_MB = parseInt(process.env.MAX_FILE_SIZE_MB || '25', 10);
-const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
+const parsedSize = parseInt(process.env.MAX_FILE_SIZE_MB, 10);
+const MAX_FILE_SIZE_MB = (process.env.MAX_FILE_SIZE_MB === 'unlimited' || !parsedSize || isNaN(parsedSize)) ? null : parsedSize;
+const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB ? MAX_FILE_SIZE_MB * 1024 * 1024 : Infinity;
 const DEFAULT_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24-hour default expiry
 
 // Ensure temporary uploads directory exists
@@ -129,7 +130,7 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage,
   limits: {
-    fileSize: MAX_FILE_SIZE_BYTES,
+    ...(Number.isFinite(MAX_FILE_SIZE_BYTES) ? { fileSize: MAX_FILE_SIZE_BYTES } : {}),
     files: 1, // 1 file at a time
   },
 });
@@ -150,7 +151,7 @@ app.get('/api/health', (req, res) => {
     status: 'healthy',
     timestamp: new Date().toISOString(),
     activeFiles: filesStore.size,
-    maxFileSizeMB: MAX_FILE_SIZE_MB,
+    maxFileSizeMB: MAX_FILE_SIZE_MB ? `${MAX_FILE_SIZE_MB}MB` : 'Unlimited (5GB+ supported)',
     defaultExpiryHours: 24,
   });
 });
@@ -162,11 +163,12 @@ const uploadMiddleware = upload.fields([
 ]);
 
 app.post('/api/upload', (req, res) => {
+  req.setTimeout(0); // Unlimited streaming time for huge files (e.g. 5GB+)
   uploadMiddleware(req, res, (err) => {
     if (err instanceof multer.MulterError) {
       if (err.code === 'LIMIT_FILE_SIZE') {
         return res.status(413).json({
-          error: `File size exceeds the ${MAX_FILE_SIZE_MB} MB workshop limit. Please select a smaller file.`,
+          error: `File size exceeds the configured limit of ${MAX_FILE_SIZE_MB} MB.`,
         });
       }
       if (err.code === 'LIMIT_FILE_COUNT' || err.code === 'LIMIT_UNEXPECTED_FILE') {
@@ -327,7 +329,12 @@ app.delete('/api/files/:id', (req, res) => {
 });
 
 // Start Server
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`🚀 QuickShare Backend running on http://localhost:${PORT}`);
-  console.log(`📂 Upload directory: ${uploadsDir} (24h Auto-Expiry Active, Max: ${MAX_FILE_SIZE_MB}MB)`);
+  console.log(`📂 Upload directory: ${uploadsDir} (24h Auto-Expiry Active, File Limit: ${MAX_FILE_SIZE_MB ? `${MAX_FILE_SIZE_MB}MB` : 'Unlimited / 5GB+'})`);
 });
+
+// Configure server timeouts for streaming 5GB+ files
+server.timeout = 0; // No socket timeout
+server.keepAliveTimeout = 300000; // 5 minutes keepalive
+server.headersTimeout = 305000;

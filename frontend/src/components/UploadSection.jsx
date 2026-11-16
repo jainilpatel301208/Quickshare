@@ -17,13 +17,11 @@ import {
   Loader2,
   Lock,
   Zap,
-  Globe
+  Globe,
+  HardDrive
 } from 'lucide-react';
 import { formatBytes, getFileCategory } from '../utils/formatters';
 import { saveClientTransfer } from '../utils/clientStorage';
-
-const MAX_FILE_SIZE_MB = 25;
-const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 
 export default function UploadSection({ onUploadSuccess, showToast }) {
   const [isDragOver, setIsDragOver] = useState(false);
@@ -32,6 +30,7 @@ export default function UploadSection({ onUploadSuccess, showToast }) {
   const [burnAfterDownload, setBurnAfterDownload] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadStats, setUploadStats] = useState({ loaded: 0, total: 0, percent: 0 });
   const [uploadError, setUploadError] = useState('');
   const fileInputRef = useRef(null);
 
@@ -65,16 +64,6 @@ export default function UploadSection({ onUploadSuccess, showToast }) {
 
   const processFile = (file) => {
     setUploadError('');
-
-    if (file.size > MAX_FILE_SIZE_BYTES) {
-      const errorMsg = `File "${file.name}" (${formatBytes(file.size)}) exceeds the ${MAX_FILE_SIZE_MB} MB limit.`;
-      setUploadError(errorMsg);
-      showToast(errorMsg, 'error');
-      setSelectedFile(null);
-      if (fileInputRef.current) fileInputRef.current.value = '';
-      return;
-    }
-
     setSelectedFile(file);
     showToast(`Selected "${file.name}" (${formatBytes(file.size)})`, 'info');
   };
@@ -82,44 +71,56 @@ export default function UploadSection({ onUploadSuccess, showToast }) {
   const removeFile = () => {
     setSelectedFile(null);
     setUploadError('');
+    setUploadStats({ loaded: 0, total: 0, percent: 0 });
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   const performClientUpload = async (file) => {
-    for (let p = 25; p <= 90; p += 25) {
-      setUploadProgress(p);
-      await new Promise((r) => setTimeout(r, 80));
-    }
-    setUploadProgress(100);
+    try {
+      for (let p = 25; p <= 90; p += 25) {
+        setUploadProgress(p);
+        await new Promise((r) => setTimeout(r, 60));
+      }
+      setUploadProgress(100);
 
-    const transferId = 't-' + Math.random().toString(36).substring(2, 9) + '-' + Date.now().toString(36);
-    const shortCode = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+      const transferId = 't-' + Math.random().toString(36).substring(2, 9) + '-' + Date.now().toString(36);
+      const shortCode = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
 
-    const record = {
-      transferId,
-      id: transferId,
-      shortCode,
-      originalName: file.name,
-      mimeType: file.type || 'application/octet-stream',
-      size: file.size,
-      uploadedAt: new Date().toISOString(),
-      expiresAt,
-      burnAfterDownload: burnAfterDownload === true,
-      downloadCount: 0,
-      isClientMode: true,
-    };
+      const record = {
+        transferId,
+        id: transferId,
+        shortCode,
+        originalName: file.name,
+        mimeType: file.type || 'application/octet-stream',
+        size: file.size,
+        uploadedAt: new Date().toISOString(),
+        expiresAt,
+        burnAfterDownload: burnAfterDownload === true,
+        downloadCount: 0,
+        isClientMode: true,
+      };
 
-    await saveClientTransfer(record, file);
+      const saved = await saveClientTransfer(record, file);
+      if (!saved) {
+        throw new Error('Browser offline storage limit reached for very large files. Run the backend server for 5GB+ transfers.');
+      }
 
-    setTimeout(() => {
+      setTimeout(() => {
+        setIsUploading(false);
+        setUploadProgress(0);
+        setSelectedFile(null);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        onUploadSuccess([record]);
+        showToast('File stored and share link generated!', 'success');
+      }, 200);
+    } catch (err) {
       setIsUploading(false);
       setUploadProgress(0);
-      setSelectedFile(null);
-      if (fileInputRef.current) fileInputRef.current.value = '';
-      onUploadSuccess([record]);
-      showToast('File stored and share link generated!', 'success');
-    }, 200);
+      const msg = err.message || 'Offline upload failed. For large files (e.g. 5GB+), please ensure the QuickShare backend server is running.';
+      setUploadError(msg);
+      showToast(msg, 'error');
+    }
   };
 
   const handleUpload = () => {
@@ -128,16 +129,10 @@ export default function UploadSection({ onUploadSuccess, showToast }) {
       return;
     }
 
-    if (selectedFile.size > MAX_FILE_SIZE_BYTES) {
-      const errorMsg = `File exceeds the ${MAX_FILE_SIZE_MB} MB limit.`;
-      setUploadError(errorMsg);
-      showToast(errorMsg, 'error');
-      return;
-    }
-
     setIsUploading(true);
     setUploadError('');
-    setUploadProgress(10);
+    setUploadProgress(5);
+    setUploadStats({ loaded: 0, total: selectedFile.size, percent: 5 });
 
     const formData = new FormData();
     formData.append('file', selectedFile);
@@ -150,8 +145,13 @@ export default function UploadSection({ onUploadSuccess, showToast }) {
 
       xhr.upload.onprogress = (event) => {
         if (event.lengthComputable) {
-          const percent = Math.round((event.loaded / event.total) * 95);
+          const percent = Math.round((event.loaded / event.total) * 100);
           setUploadProgress(percent);
+          setUploadStats({
+            loaded: event.loaded,
+            total: event.total,
+            percent,
+          });
         }
       };
 
@@ -233,7 +233,7 @@ export default function UploadSection({ onUploadSuccess, showToast }) {
           </h3>
           
           <p className="dropzone-desc">
-            Direct temporary storage &bull; Max {MAX_FILE_SIZE_MB} MB limit &bull; 24h Auto-Expiry
+            Direct temporary storage &bull; Unlimited file size (5GB+ supported) &bull; 24h Auto-Expiry
           </p>
 
           <div className="dropzone-action-row" onClick={(e) => e.stopPropagation()}>
@@ -368,7 +368,14 @@ export default function UploadSection({ onUploadSuccess, showToast }) {
         {isUploading && (
           <div className="progress-container" id="upload-progress-container">
             <div className="progress-header">
-              <span>Uploading to server...</span>
+              <span>
+                Uploading to server...
+                {uploadStats.total > 0 && (
+                  <span style={{ marginLeft: '0.5rem', opacity: 0.85, fontSize: '0.8rem' }}>
+                    ({formatBytes(uploadStats.loaded)} / {formatBytes(uploadStats.total)})
+                  </span>
+                )}
+              </span>
               <span>{uploadProgress}%</span>
             </div>
             <div className="progress-track">
@@ -413,7 +420,7 @@ export default function UploadSection({ onUploadSuccess, showToast }) {
       <div className="product-features-row">
         <div className="feature-pill">
           <Zap size={16} color="#000000" />
-          <span>Max 25 MB Limit</span>
+          <span>Unlimited File Size (5GB+)</span>
         </div>
         <div className="feature-pill">
           <Clock size={16} color="#000000" />
