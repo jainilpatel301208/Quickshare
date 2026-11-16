@@ -328,6 +328,16 @@ app.delete('/api/files/:id', (req, res) => {
   res.json({ message: 'File deleted successfully.' });
 });
 
+// 7. Serve compiled frontend in production (Single-Service full-stack deployment)
+const frontendDist = path.join(__dirname, '../frontend/dist');
+if (fs.existsSync(frontendDist)) {
+  app.use(express.static(frontendDist));
+  app.use((req, res, next) => {
+    if (req.path.startsWith('/api')) return next();
+    res.sendFile(path.join(frontendDist, 'index.html'));
+  });
+}
+
 // Start Server
 const server = app.listen(PORT, () => {
   console.log(`🚀 QuickShare Backend running on http://localhost:${PORT}`);
