@@ -20,6 +20,7 @@ import {
   Globe
 } from 'lucide-react';
 import { formatBytes, getFileCategory } from '../utils/formatters';
+import { saveClientTransfer } from '../utils/clientStorage';
 
 const MAX_FILE_SIZE_MB = 25;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
@@ -84,6 +85,43 @@ export default function UploadSection({ onUploadSuccess, showToast }) {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
+  const performClientUpload = async (file) => {
+    for (let p = 25; p <= 90; p += 25) {
+      setUploadProgress(p);
+      await new Promise((r) => setTimeout(r, 80));
+    }
+    setUploadProgress(100);
+
+    const transferId = 't-' + Math.random().toString(36).substring(2, 9) + '-' + Date.now().toString(36);
+    const shortCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+
+    const record = {
+      transferId,
+      id: transferId,
+      shortCode,
+      originalName: file.name,
+      mimeType: file.type || 'application/octet-stream',
+      size: file.size,
+      uploadedAt: new Date().toISOString(),
+      expiresAt,
+      burnAfterDownload: burnAfterDownload === true,
+      downloadCount: 0,
+      isClientMode: true,
+    };
+
+    await saveClientTransfer(record, file);
+
+    setTimeout(() => {
+      setIsUploading(false);
+      setUploadProgress(0);
+      setSelectedFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      onUploadSuccess([record]);
+      showToast('File stored and share link generated!', 'success');
+    }, 200);
+  };
+
   const handleUpload = () => {
     if (!selectedFile) {
       showToast('Please select a file to upload.', 'error');
@@ -131,35 +169,22 @@ export default function UploadSection({ onUploadSuccess, showToast }) {
               onUploadSuccess([fileResult]);
             }, 300);
           } catch (e) {
-            setIsUploading(false);
-            setUploadError('Invalid response from server.');
-            showToast('Invalid server response.', 'error');
+            performClientUpload(selectedFile);
           }
         } else {
-          setIsUploading(false);
-          let errorMsg = 'Failed to upload file. Please try again.';
-          try {
-            const res = JSON.parse(xhr.responseText);
-            if (res.error) errorMsg = res.error;
-          } catch (e) {}
-          setUploadError(errorMsg);
-          showToast(errorMsg, 'error');
+          // If server returned 404/500/offline, use client storage fallback
+          performClientUpload(selectedFile);
         }
       };
 
       xhr.onerror = () => {
-        setIsUploading(false);
-        const errorMsg = 'Network Error: Cannot connect to backend server.';
-        setUploadError(errorMsg);
-        showToast(errorMsg, 'error');
+        // Backend offline or running on static host (e.g. GitHub Pages)
+        performClientUpload(selectedFile);
       };
 
       xhr.send(formData);
     } catch (err) {
-      console.error('Upload exception:', err);
-      setIsUploading(false);
-      setUploadError('Unexpected error occurred during upload.');
-      showToast('Error preparing upload.', 'error');
+      performClientUpload(selectedFile);
     }
   };
 

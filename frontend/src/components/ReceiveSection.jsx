@@ -10,6 +10,7 @@ import {
   Flame
 } from 'lucide-react';
 import { formatBytes, formatExpiry, getFileCategory } from '../utils/formatters';
+import { getClientTransfer, deleteClientTransfer } from '../utils/clientStorage';
 
 export default function ReceiveSection({ initialCode = '', showToast }) {
   const [code, setCode] = useState(initialCode);
@@ -42,29 +43,50 @@ export default function ReceiveSection({ initialCode = '', showToast }) {
       if (res.ok) {
         const data = await res.json();
         setFileData(data);
-      } else {
-        const err = await res.json().catch(() => ({}));
-        setErrorMessage(err.error || 'File not found or link has expired.');
-        showToast(err.error || 'File not found', 'error');
+        setIsLoading(false);
+        return;
       }
-    } catch (err) {
-      console.error(err);
-      setErrorMessage('Could not connect to backend server.');
-      showToast('Network error: Is the backend server running?', 'error');
-    } finally {
-      setIsLoading(false);
-    }
+    } catch (err) {}
+
+    // Check clientStorage
+    try {
+      const clientFile = await getClientTransfer(trimmed);
+      if (clientFile) {
+        setFileData(clientFile);
+        setIsLoading(false);
+        return;
+      }
+    } catch (e) {}
+
+    setErrorMessage('File not found or link has expired.');
+    showToast('File not found', 'error');
+    setIsLoading(false);
   };
 
   const handleDownload = () => {
     if (!fileData) return;
-    const downloadId = fileData.transferId || fileData.id;
-    const downloadUrl = `/api/download/${downloadId}`;
-    window.location.href = downloadUrl;
     setDownloadSuccess(true);
     showToast(`Downloading "${fileData.originalName}"...`, 'success');
 
+    if (fileData.blob) {
+      const url = URL.createObjectURL(fileData.blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileData.originalName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } else {
+      const downloadId = fileData.transferId || fileData.id;
+      const downloadUrl = `/api/download/${downloadId}`;
+      window.location.href = downloadUrl;
+    }
+
     if (fileData.burnAfterDownload) {
+      if (fileData.isClientMode) {
+        deleteClientTransfer(fileData.id);
+      }
       setTimeout(() => {
         setFileData(null);
         setErrorMessage('This file was set to burn after 1 download and has been destroyed.');

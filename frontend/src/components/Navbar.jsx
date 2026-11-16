@@ -17,11 +17,11 @@ export default function Navbar({ isServerOnline, fileCount }) {
         {/* Server status badge */}
         <div 
           className={`status-badge ${isServerOnline ? 'online' : 'offline'}`}
-          title={isServerOnline ? 'Backend server connected' : 'Cannot connect to backend server'}
+          title={isServerOnline ? 'Express backend connected' : 'Client Storage Mode: Files stored in browser storage'}
           id="server-status-badge"
         >
           <div className="status-dot" />
-          <span>{isServerOnline ? 'Server Active' : 'Offline'}</span>
+          <span>{isServerOnline ? 'Server Active' : 'Client Mode'}</span>
         </div>
       </div>
     </header>

@@ -48,9 +48,9 @@ export default function ShareModal({ uploadedFiles, onReset, showToast }) {
   };
 
   const getFullShareUrl = (file) => {
-    const origin = window.location.origin;
     const transferId = file.transferId || file.id;
-    return `${origin}/download/${transferId}`;
+    const base = window.location.href.split('?')[0].split('#')[0].replace(/\/download\/.*$/, '').replace(/\/$/, '');
+    return `${base}/?download=${transferId}`;
   };
 
   return (
@@ -203,26 +203,41 @@ export default function ShareModal({ uploadedFiles, onReset, showToast }) {
                 <span>{isQrOpen ? 'Hide QR Code' : 'Show QR Code'}</span>
               </button>
 
-              <a
-                href={`/download/${transferId}`}
+              <button
+                type="button"
                 className="btn-secondary"
-                style={{ textDecoration: 'none' }}
+                onClick={() => {
+                  window.history.pushState({}, '', `?download=${transferId}`);
+                  window.dispatchEvent(new PopStateEvent('popstate'));
+                }}
                 id={`view-download-page-btn-${idx}`}
               >
                 <ExternalLink size={16} color="#000000" />
                 <span>Open Download Page</span>
-              </a>
+              </button>
 
-              <a
-                href={`/api/download/${transferId}`}
-                download={file.originalName}
+              <button
+                type="button"
                 className="btn-secondary"
-                style={{ textDecoration: 'none' }}
+                onClick={() => {
+                  if (file.blob) {
+                    const u = URL.createObjectURL(file.blob);
+                    const a = document.createElement('a');
+                    a.href = u;
+                    a.download = file.originalName;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(u);
+                  } else {
+                    window.location.href = `/api/download/${transferId}`;
+                  }
+                }}
                 id={`direct-download-btn-${idx}`}
               >
                 <Download size={16} color="#000000" />
                 <span>Direct Download</span>
-              </a>
+              </button>
             </div>
           </div>
         );

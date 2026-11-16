@@ -18,6 +18,7 @@ import {
   Share2
 } from 'lucide-react';
 import { formatBytes, formatTimeAgo, formatExpiry, getFileCategory } from '../utils/formatters';
+import { getClientTransfer, deleteClientTransfer } from '../utils/clientStorage';
 
 export default function DownloadPage({ transferId, onGoHome, showToast }) {
   const [fileData, setFileData] = useState(null);
@@ -43,53 +44,81 @@ export default function DownloadPage({ transferId, onGoHome, showToast }) {
     setErrorStatus(null);
     setErrorMessage('');
 
+    // 1. Try backend API first
     try {
       const res = await fetch(`/api/files/${id}`);
       if (res.ok) {
         const data = await res.json();
         setFileData(data);
+        setIsLoading(false);
+        return;
       } else if (res.status === 410) {
         setErrorStatus('expired');
         const err = await res.json().catch(() => ({}));
         setErrorMessage(err.error || 'This file transfer link has expired and is no longer available.');
-      } else if (res.status === 404) {
-        setErrorStatus('not_found');
-        const err = await res.json().catch(() => ({}));
-        setErrorMessage(err.error || 'The requested file transfer does not exist or was removed.');
-      } else {
-        setErrorStatus('unknown');
-        setErrorMessage('Unable to retrieve file details. Please try again later.');
+        setIsLoading(false);
+        return;
       }
     } catch (err) {
-      console.error('Fetch error:', err);
-      setErrorStatus('network_error');
-      setErrorMessage('Could not connect to the QuickShare server.');
-    } finally {
-      setIsLoading(false);
+      // Backend not running / static host
     }
+
+    // 2. Check local client storage (IndexedDB)
+    try {
+      const clientFile = await getClientTransfer(id);
+      if (clientFile) {
+        if (clientFile.expiresAt && new Date(clientFile.expiresAt).getTime() < Date.now()) {
+          await deleteClientTransfer(clientFile.id);
+          setErrorStatus('expired');
+          setErrorMessage('This file transfer has expired.');
+        } else {
+          setFileData(clientFile);
+        }
+        setIsLoading(false);
+        return;
+      }
+    } catch (e) {}
+
+    setErrorStatus('not_found');
+    setErrorMessage('The requested file transfer does not exist or was removed.');
+    setIsLoading(false);
   };
 
   const handleDownload = () => {
     if (!fileData) return;
-    const downloadId = fileData.transferId || fileData.id;
-    const downloadUrl = `/api/download/${downloadId}`;
 
     setIsDownloading(true);
     setDownloadCompleted(true);
     showToast(`Starting download: "${fileData.originalName}"`, 'success');
 
-    window.location.href = downloadUrl;
-
-    setTimeout(() => {
+    if (fileData.blob) {
+      const url = URL.createObjectURL(fileData.blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileData.originalName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
       setIsDownloading(false);
-    }, 2000);
+    } else {
+      const downloadId = fileData.transferId || fileData.id;
+      const downloadUrl = `/api/download/${downloadId}`;
+      window.location.href = downloadUrl;
+      setTimeout(() => {
+        setIsDownloading(false);
+      }, 2000);
+    }
 
     if (fileData.burnAfterDownload) {
+      if (fileData.isClientMode) {
+        deleteClientTransfer(fileData.id);
+      }
       setTimeout(() => {
         setFileData(null);
         setErrorStatus('expired');
-        setErrorMessage('This file was set to burn after 1 download and has been securely deleted from the server.');
-      }, 4000);
+        setErrorMessage('This file was set to burn after 1 download and has been securely deleted.');
+      }, 3000);
     }
   };
 

@@ -7,6 +7,7 @@ import DownloadPage from './components/DownloadPage';
 import ActiveTransfers from './components/ActiveTransfers';
 import Toast from './components/Toast';
 import { Send, DownloadCloud, Sparkles } from 'lucide-react';
+import { getAllClientTransfers, deleteClientTransfer } from './utils/clientStorage';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('send');
@@ -36,13 +37,11 @@ export default function App() {
     const path = window.location.pathname;
     const params = new URLSearchParams(window.location.search);
 
-    // 1. Path route: /download/:id
-    if (path.startsWith('/download/')) {
-      const id = path.replace('/download/', '').trim();
-      if (id) {
-        setDownloadPageTransferId(id);
-        return;
-      }
+    // 1. Path route: /download/:id or .../download/:id
+    const downloadPathMatch = path.match(/\/download\/([^/]+)/);
+    if (downloadPathMatch && downloadPathMatch[1]) {
+      setDownloadPageTransferId(decodeURIComponent(downloadPathMatch[1]));
+      return;
     }
 
     // 2. Query param: ?download=:id
@@ -79,7 +78,8 @@ export default function App() {
     setDownloadPageTransferId(null);
     setUploadedFiles(null);
     setActiveTab('send');
-    window.history.pushState({}, '', '/');
+    const basePath = window.location.pathname.replace(/\/download\/.*$/, '').replace(/\/$/, '') || '/';
+    window.history.pushState({}, '', basePath);
   };
 
   // Fetch active files and monitor server connectivity
@@ -91,15 +91,20 @@ export default function App() {
         const data = await res.json();
         setAllFiles(data.files || []);
         setIsServerOnline(true);
-      } else {
-        setIsServerOnline(false);
+        setIsLoadingTransfers(false);
+        return;
       }
-    } catch (err) {
-      console.warn('Backend server not reachable:', err);
-      setIsServerOnline(false);
-    } finally {
-      setIsLoadingTransfers(false);
+    } catch (err) {}
+
+    // Fallback to clientStorage when backend is unreachable (e.g. GitHub Pages)
+    try {
+      const clientFiles = await getAllClientTransfers();
+      setAllFiles(clientFiles || []);
+    } catch (e) {
+      setAllFiles([]);
     }
+    setIsServerOnline(false);
+    setIsLoadingTransfers(false);
   };
 
   useEffect(() => {
@@ -111,7 +116,6 @@ export default function App() {
   const handleUploadSuccess = (files) => {
     setUploadedFiles(files);
     fetchFiles();
-    showToast('File uploaded successfully! Share link is ready.', 'success');
   };
 
   const handleResetUpload = () => {
@@ -128,11 +132,15 @@ export default function App() {
         if (uploadedFiles) {
           setUploadedFiles((prev) => prev?.filter((f) => (f.transferId || f.id) !== id) || null);
         }
-      } else {
-        showToast('Failed to delete file.', 'error');
+        return;
       }
-    } catch (err) {
-      showToast('Network error while deleting.', 'error');
+    } catch (err) {}
+
+    await deleteClientTransfer(id);
+    showToast(`Deleted "${fileName}"`, 'info');
+    setAllFiles((prev) => prev.filter((f) => (f.transferId || f.id) !== id));
+    if (uploadedFiles) {
+      setUploadedFiles((prev) => prev?.filter((f) => (f.transferId || f.id) !== id) || null);
     }
   };
 
